@@ -19,6 +19,7 @@ from urllib.request import Request, urlopen
 DEFAULT_STATE_FILE = ".close_idle_tabs_state.json"
 REQUEST_TIMEOUT_SECONDS = 5
 MINIMUM_PYTHON = (3, 8)
+LONG_IDLE_NOTICE_SECONDS = 365 * 24 * 60 * 60
 
 
 class ToolError(Exception):
@@ -51,7 +52,8 @@ def parse_args():
         "--idle-seconds",
         type=int,
         default=600,
-        help="unchanged seconds required before a page is eligible (minimum: 1; default: 600)",
+        help="unchanged seconds required before a page is eligible (minimum: 1; default: 600; "
+             "no maximum; notice above 31536000 seconds / 365 days)",
     )
     parser.add_argument(
         "--keep",
@@ -79,14 +81,14 @@ def parse_args():
                         help="suppress normal reports and unavailable-endpoint notices")
     args = parser.parse_args()
 
+    if args.idle_seconds < 1:
+        parser.error("--idle-seconds must be at least 1")
     if args.port is not None:
         if not 1 <= args.port <= 65535:
             parser.error("--port must be between 1 and 65535")
         args.endpoint = "http://127.0.0.1:{}".format(args.port)
     if not args.endpoint:
         parser.error("set CDP_ENDPOINT or pass --endpoint or --port")
-    if args.idle_seconds < 1:
-        parser.error("--idle-seconds must be at least 1")
     problem = endpoint_problem(args.endpoint)
     if problem:
         parser.error("--endpoint " + problem)
@@ -318,6 +320,10 @@ def main():
             sys.version_info[0], sys.version_info[1]), file=sys.stderr)
         return 2
     args = parse_args()
+    if args.idle_seconds > LONG_IDLE_NOTICE_SECONDS:
+        print("Notice: --idle-seconds exceeds 31536000 seconds (365 days); eligibility "
+              "requires observations this old in saved state. Reuse --state-file across runs.",
+              file=sys.stderr)
     try:
         run(args)
     except EndpointUnavailable as error:

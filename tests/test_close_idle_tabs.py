@@ -128,6 +128,37 @@ class IdleTabsTests(unittest.TestCase):
         with patch("sys.argv", ["cdpidletabs", "--port", "9450", "--idle-seconds", "1"]):
             self.assertEqual(tool.parse_args().idle_seconds, 1)
 
+    def test_invalid_idle_seconds_without_endpoint_is_reported_first(self):
+        for value in ("0", "-5"):
+            with patch.dict(os.environ, {}, clear=True), patch("sys.argv", ["cdpidletabs", "--idle-seconds", value]), patch.object(tool, "run") as run, redirect_stderr(io.StringIO()) as err:
+                with self.assertRaises(SystemExit) as caught:
+                    tool.main()
+            self.assertEqual(caught.exception.code, 2)
+            self.assertIn("--idle-seconds must be at least 1", err.getvalue())
+            run.assert_not_called()
+
+    def test_large_idle_threshold_notice_including_quiet_mode(self):
+        for quiet in (False, True):
+            options = ["--quiet"] if quiet else []
+            with patch("sys.argv", ["cdpidletabs", "--port", "9490", "--idle-seconds", "99999999999", *options]), patch.object(tool, "run") as run, redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(tool.main(), 0)
+            self.assertEqual(run.call_args.args[0].idle_seconds, 99999999999)
+            self.assertIn("Reuse --state-file across runs", err.getvalue())
+            self.assertEqual(len(err.getvalue().splitlines()), 1)
+
+    def test_long_idle_notice_boundary(self):
+        for value, notice in ((31536000, False), (31536001, True)):
+            with patch("sys.argv", ["cdpidletabs", "--port", "9490", "--idle-seconds", str(value)]), patch.object(tool, "run"), redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(tool.main(), 0)
+            self.assertEqual("Notice:" in err.getvalue(), notice)
+
+    def test_large_threshold_can_become_eligible_from_saved_observations(self):
+        self.args.idle_seconds = 99999999999
+        self.args.close = True
+        self.run_at(100)
+        close = self.run_at(100 + self.args.idle_seconds)
+        close.assert_called_once_with(self.args.endpoint, "two")
+
     def test_old_python_gets_friendly_error_before_arguments_or_network(self):
         with patch.object(tool.sys, "version_info", (3, 7, 17)), patch.object(tool, "parse_args") as parse, patch.object(tool, "urlopen") as opened, redirect_stderr(io.StringIO()) as err:
             self.assertEqual(tool.main(), 2)
