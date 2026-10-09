@@ -107,6 +107,23 @@ class IdleTabsTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 0)
         opened.assert_not_called()
 
+    def test_old_python_gets_friendly_error_before_arguments_or_network(self):
+        with patch.object(tool.sys, "version_info", (3, 7, 17)), patch.object(tool, "parse_args") as parse, patch.object(tool, "urlopen") as opened, redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(tool.main(), 2)
+        self.assertIn("needs Python 3.8 or newer (found 3.7)", err.getvalue())
+        self.assertNotIn("Traceback", err.getvalue())
+        parse.assert_not_called()
+        opened.assert_not_called()
+
+    def test_minimum_python_and_mac_system_python_can_print_help(self):
+        for version in ((3, 8, 20), (3, 9, 6)):
+            with patch.object(tool.sys, "version_info", version), patch("sys.argv", ["cdpidletabs", "--help"]), patch.object(tool, "urlopen") as opened, redirect_stdout(io.StringIO()) as out:
+                with self.assertRaises(SystemExit) as caught:
+                    tool.main()
+            self.assertEqual(caught.exception.code, 0)
+            self.assertIn("--endpoint", out.getvalue())
+            opened.assert_not_called()
+
     def test_endpoint_validation_rejects_credentials_and_queries(self):
         for value in ("https://" + "user:" + "pass@" + "browser.example.test", "https://browser.example.test/?a=b", "file:///data"):
             with patch("sys.argv", ["cdpidletabs", "--endpoint", value]), redirect_stderr(io.StringIO()):

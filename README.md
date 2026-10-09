@@ -2,13 +2,58 @@
 
 Each run queries a Chrome DevTools Protocol (CDP) endpoint for page tabs and compares each tab's title and URL with the previous run. When that pair has stayed unchanged for the configured threshold, the script reports the tab as idle; with `--close`, it asks Chrome to close it. It runs in dry-run mode by default, keeps one remaining page open, and skips URLs matching `--keep` patterns.
 
-## Setup
+## Install
 
-Requires Python 3.9 or newer and Chrome with its DevTools Protocol endpoint enabled. Set `CDP_ENDPOINT` in the environment to the browser's HTTP debugging endpoint, or pass it with `--endpoint`. The script uses only Python's standard library and Chrome's existing CDP HTTP endpoints (`/json/list` and `/json/close/{id}`).
+Python **3.8+** is required; **no packages needed**. From the cloned repository,
+run this first (on Windows, use `py -3` in place of `python3`):
 
-Run the script from the same working directory each time so its default `.close_idle_tabs_state.json` observation file is reused (cron and systemd must set the same working directory, or every run starts fresh). The file stores target IDs, SHA-256 digests of title and URL pairs, and timestamps; it does not store page titles or URLs. To check the command from a fresh checkout, run `python3 close_idle_tabs.py --help`; it prints the available options and exits without contacting Chrome.
+```sh
+python3 close_idle_tabs.py --help
+```
 
-## Quickstart from a local clone
+Help prints the available options and exits without contacting Chrome. The script
+uses only Python's standard library and Chrome's existing CDP HTTP endpoints
+(`/json/list` and `/json/close/{id}`). Python below 3.8 gets a short
+"needs Python 3.8 or newer" message. Chrome with debugging enabled is needed for
+actual tab observations; see the launch commands below.
+
+### Linux
+
+Check `python3 --version`. If Python is missing or older than 3.8, install a
+supported Python 3 through your distribution's package manager. You can run
+`python3 close_idle_tabs.py` directly; neither pip nor a virtual environment is
+required.
+
+### macOS
+
+Check `python3 --version` before starting. The Python supplied by macOS developer
+tools can be 3.9.6, which works; some Macs have an older version or no Python 3.
+For a newer version, use the [Python.org macOS installer](https://www.python.org/downloads/macos/),
+then open a new Terminal and check `python3 --version` again. Run
+`python3 close_idle_tabs.py --help` from the clone.
+
+### Windows (PowerShell)
+
+Use the Python launcher, not `python3`, which can be a Microsoft Store stub:
+
+```powershell
+py -3 --version
+py -3 close_idle_tabs.py --help
+```
+
+If `py` is unavailable or reports a version below 3.8, install Python 3 from
+[Python.org for Windows](https://www.python.org/downloads/windows/) with the
+launcher option enabled, reopen PowerShell, and repeat the check. Use `py -3`
+for the script and test commands throughout this README.
+
+### Optional installed command
+
+If you want a `cdpidletabs` command, use a virtual environment. On Debian/Ubuntu,
+if venv fails because `ensurepip` is missing, first install `python3-venv` with
+your package manager (for example `sudo apt install python3-venv`, requiring
+administrator access), or continue with the direct script above.
+
+Linux/macOS:
 
 ```sh
 python3 -m venv .venv
@@ -17,12 +62,29 @@ python -m pip install .
 cdpidletabs --help
 ```
 
-On Debian/Ubuntu, `python3 -m venv` may need `apt install python3-venv`.
-The help check works without a configured endpoint and makes no browser requests.
+Windows PowerShell (activation is optional):
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install .
+cdpidletabs --help
+```
+
+If PowerShell blocks activation, use `.\.venv\Scripts\python.exe -m pip install .`
+and `.\.venv\Scripts\cdpidletabs.exe --help` without changing execution policy.
+If you already use pipx, `pipx install .` is another optional way to install the
+command; pipx itself and package building need installation tools and downloads.
+
+Set `CDP_ENDPOINT` in the environment to the browser's HTTP debugging endpoint,
+or pass it with `--endpoint`.
+
+Run the script from the same working directory each time so its default `.close_idle_tabs_state.json` observation file is reused (cron and systemd must set the same working directory, or every run starts fresh). The file stores target IDs, SHA-256 digests of title and URL pairs, and timestamps; it does not store page titles or URLs. To check the command from a fresh checkout, run `python3 close_idle_tabs.py --help`; it prints the available options and exits without contacting Chrome.
+
 Automated tests use mocked HTTP responses and temporary state files:
 
 ```sh
-python -m unittest discover -s tests -q
+python3 -m unittest discover -s tests -q
 ```
 
 MIT licensed, pre-release. No package or public release has been published.

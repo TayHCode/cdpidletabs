@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 
 DEFAULT_STATE_FILE = ".close_idle_tabs_state.json"
 REQUEST_TIMEOUT_SECONDS = 5
+MINIMUM_PYTHON = (3, 8)
 
 
 class ToolError(Exception):
@@ -241,6 +242,10 @@ def run(args):
 
 
 def main():
+    if sys.version_info[:2] < MINIMUM_PYTHON:
+        print("cdpidletabs needs Python 3.8 or newer (found {}.{}).".format(
+            sys.version_info[0], sys.version_info[1]), file=sys.stderr)
+        return 2
     args = parse_args()
     try:
         run(args)
