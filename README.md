@@ -48,8 +48,9 @@ for the script and test commands throughout this README.
 
 ### Optional installed command
 
-If you want a `cdpidletabs` command, use a virtual environment. On Debian/Ubuntu,
-if venv fails because `ensurepip` is missing, first install `python3-venv` with
+If you want a `cdpidletabs` command, use a virtual environment. The direct script
+above is the no-admin option. On Debian/Ubuntu, venv needs `python3-venv`; if
+`ensurepip` is missing, first install it with
 your package manager (for example `sudo apt install python3-venv`, requiring
 administrator access), or continue with the direct script above.
 
@@ -161,7 +162,8 @@ chrome_profile=$(mktemp -d "${TMPDIR:-/tmp}/cdpidletabs-profile.XXXXXX")
 
 ### Windows (PowerShell)
 
-In a logged-in Windows desktop session:
+Run this in a **normal desktop PowerShell window on the Windows machine, not
+over SSH/remote shell**:
 
 ```powershell
 $chromeProfile = Join-Path $env:TEMP ("cdpidletabs-profile-" + [guid]::NewGuid())
@@ -172,6 +174,27 @@ $chromeProfile = Join-Path $env:TEMP ("cdpidletabs-profile-" + [guid]::NewGuid()
 
 If Chrome is installed elsewhere, replace the executable path with its actual
 location. `$chromeProfile` is a new disposable directory, not your regular profile.
+
+A Windows SSH shell has no interactive desktop, even when somebody is logged in
+at the console. The graphical command can exit silently with status 0 without
+leaving a debugging listener; Chrome launched from that shell can also die when
+the SSH session ends. `Start-Process` alone does not provide a desktop session.
+
+For an SSH/remote shell, use headless Chrome (no visible window):
+
+```powershell
+$chromeProfile = Join-Path $env:TEMP ("cdpidletabs-profile-" + [guid]::NewGuid())
+& "$env:ProgramFiles\Google\Chrome\Application\chrome.exe" `
+  --headless=new --remote-debugging-port=9446 --remote-debugging-address=127.0.0.1 `
+  "--user-data-dir=$chromeProfile"
+```
+
+Keep the launch SSH session open while using it; check the endpoint from a second
+shell. Headless Chrome works without a desktop, but it also stops when that SSH
+session ends on Windows. For visible Chrome started remotely, run the desktop
+command in a scheduled task with `New-ScheduledTaskPrincipal -LogonType Interactive` for the
+logged-in user, then remove your task after use. A task running in the background
+without that interactive logon type is not equivalent to a desktop launch.
 
 ### Check the dedicated endpoint
 
@@ -195,6 +218,13 @@ PowerShell equivalent:
 Invoke-RestMethod http://127.0.0.1:9446/json/version
 py -3 close_idle_tabs.py --endpoint http://127.0.0.1:9446
 ```
+
+The version request must return Chrome's JSON before continuing. If no listener
+is available, the script prints **`NOT CHECKED: nothing is listening on port 9446`**
+(followed by a skipped-run explanation). Its exit status is still 0 for
+scheduled-use compatibility; this is **not a successful endpoint check**. Fix
+the launch or port and repeat the version request. DNS/timeout failures also
+print `NOT CHECKED`, without claiming that there is no listener.
 
 Or set `CDP_ENDPOINT=http://127.0.0.1:9446` in a POSIX shell with
 `export CDP_ENDPOINT=http://127.0.0.1:9446`, or in PowerShell with
@@ -232,8 +262,12 @@ IDs and their status. After reviewing dry-run output, add `--close` to request
 closure of eligible pages. It keeps at least one page from the fetched list
 without requesting its closure.
 
+`--idle-seconds` accepts integers with a **minimum of 1 second** (default: 600);
+0 is rejected. Eligible dry-run output such as `idle for 4s (threshold 2s); would close`
+describes time already observed, not an additional wait.
+
 If the endpoint is unreachable (connection, DNS or timeout), the run is skipped,
-observation state stays unchanged, and it exits 0 with one short notice. Add
+observation state stays unchanged, and it exits 0 with one `NOT CHECKED` notice. Add
 `--quiet` for scheduled runs to suppress that notice and normal reports. Invalid
 JSON, HTTP rejection, bad arguments and state-file errors remain real errors;
 `--quiet` does not hide them. The portable service template uses `--quiet`.
