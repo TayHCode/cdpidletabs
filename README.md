@@ -118,8 +118,8 @@ if it is missing: on Debian/Ubuntu select the `.deb` and install it with your
 package manager; on macOS move the app to Applications; on Windows run the
 installer. Installation may require administrator access. For Linux without
 that access, [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/)
-offers a ZIP: extract it into your own folder and substitute its `chrome` binary
-path for `google-chrome` below (system shared libraries are still required).
+offers a ZIP that runs from your own folder; see the exact no-admin commands
+below. System shared libraries are still required.
 
 ### Linux
 
@@ -141,6 +141,48 @@ Over SSH without a display, use this headless alternative (no visible window):
 chrome_profile=$(mktemp -d "${TMPDIR:-/tmp}/cdpidletabs-profile.XXXXXX")
 google-chrome --headless=new --remote-debugging-port=9446 \
   --remote-debugging-address=127.0.0.1 --user-data-dir="$chrome_profile"
+```
+
+### Linux without administrator access: Chrome for Testing
+
+For **Linux x86-64**, these commands need `curl`, `unzip` and Python 3. They
+select Google's current Stable ZIP, download it into a new folder and extract
+with `unzip`, which preserves Unix executable permissions. Do not substitute
+Python's `zipfile` extraction: it drops those permissions. Explicitly restore
+the executable bits on Chrome and its helper binaries as well; a non-executable
+`chrome_crashpad_handler` causes a `posix_spawn ... Permission denied` crash.
+
+Run from the repository in a shell with a free port (9446 here):
+
+```sh
+cft_dir=$(mktemp -d "${TMPDIR:-/tmp}/cdpidletabs-cft.XXXXXX")
+curl -fL https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json -o "$cft_dir/versions.json"
+cft_url=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(x["url"] for x in d["channels"]["Stable"]["downloads"]["chrome"] if x["platform"] == "linux64"))' "$cft_dir/versions.json")
+curl -fL "$cft_url" -o "$cft_dir/chrome.zip"
+unzip -q "$cft_dir/chrome.zip" -d "$cft_dir"
+chmod +x "$cft_dir/chrome-linux64/chrome" "$cft_dir/chrome-linux64/chrome_crashpad_handler" "$cft_dir/chrome-linux64/chrome_sandbox"
+chrome_profile="$cft_dir/profile"
+"$cft_dir/chrome-linux64/chrome" --headless=new --no-first-run --no-default-browser-check --remote-debugging-port=9446 --remote-debugging-address=127.0.0.1 --user-data-dir="$chrome_profile" >"$cft_dir/chrome.log" 2>&1 &
+chrome_pid=$!
+```
+
+Wait a few seconds, then require a successful version response before running
+this tool. If it fails, read `"$cft_dir/chrome.log"`; do not infer startup from
+the background command's exit status. These flags worked with the normal Chrome
+sandbox; they do not require `--no-sandbox`.
+
+```sh
+curl --fail http://127.0.0.1:9446/json/version
+python3 close_idle_tabs.py --port 9446
+```
+
+Keep these variables in the same shell. When finished, stop only the instance
+you just launched and delete only its new download/profile folder:
+
+```sh
+kill "$chrome_pid"
+wait "$chrome_pid" || true
+rm -rf -- "$cft_dir"
 ```
 
 ### macOS
@@ -171,9 +213,7 @@ Run this in a normal desktop PowerShell window on the Windows machine:
 
 ```powershell
 $chromeProfile = Join-Path $env:TEMP ("cdpidletabs-profile-" + [guid]::NewGuid())
-& "$env:ProgramFiles\Google\Chrome\Application\chrome.exe" `
-  --remote-debugging-port=9446 --remote-debugging-address=127.0.0.1 `
-  "--user-data-dir=$chromeProfile"
+& "$env:ProgramFiles\Google\Chrome\Application\chrome.exe" --no-first-run --remote-debugging-port=9446 --remote-debugging-address=127.0.0.1 "--user-data-dir=$chromeProfile"
 ```
 
 If Chrome is installed elsewhere, replace the executable path with its actual
@@ -186,50 +226,72 @@ The current Windows user must also be logged into the desktop. This route opens
 a visible Chrome window there and survives the launching SSH session ending.
 Use your own free port and a new task/profile. The block creates no trigger or
 recurring schedule, and does not require a password or an elevated principal.
-Keep the variable values in this shell for cleanup afterwards:
+Use the shipped [scripts/windows-launch.ps1](scripts/windows-launch.ps1) instead
+of pasting a multiline launch block. From the repository, a single command
+creates and runs a uniquely named task, waits for `/json/version`, and prints
+the task name and disposable profile for later cleanup:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-launch.ps1 -Port 9446
+```
+
+`-ProfileDir` accepts a **new, nonexistent** disposable directory; `-ChromeExe`
+accepts another installed Chrome path. The script rejects existing profiles,
+task names and occupied ports. It does not run the Python tool or delete the
+task on success. Copy the printed task name/profile: variables and returned
+objects do **not** survive between SSH calls.
+
+For a complete create/run/check/delete walkthrough, **save the following block
+to a file named `launch.ps1` in the repository root** (or create the file locally
+and transfer it with `scp`). Do not pipe or paste the multiline block into
+`powershell -Command -` over SSH: that can exit 0 silently without creating a
+task. Run the saved file from the repository with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File launch.ps1
+```
+
+Complete contents of `launch.ps1` (this walkthrough closes its own browser and
+removes its task/profile after the dry run, including on startup failure):
 
 ```powershell
 $ErrorActionPreference = 'Stop'
+Set-Location $PSScriptRoot
 $chromePort = 9446
-$chromeExe = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
 $chromeProfile = Join-Path $env:TEMP ("cdpidletabs-profile-" + [guid]::NewGuid())
 $taskName = "cdpidletabs-temp-" + [guid]::NewGuid()
-$currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$action = New-ScheduledTaskAction -Execute $chromeExe -Argument (
-  "--remote-debugging-port=$chromePort --remote-debugging-address=127.0.0.1 " +
-  "--user-data-dir=`"$chromeProfile`"")
-$principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
-Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal | Out-Null
-Start-ScheduledTask -TaskName $taskName
-$version = $null
-for ($attempt = 0; $attempt -lt 40; $attempt++) {
-  try {
-    $version = Invoke-RestMethod "http://127.0.0.1:$chromePort/json/version"
-    break
-  } catch { Start-Sleep -Milliseconds 500 }
+if ((Test-Path -LiteralPath $chromeProfile) -or (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) { throw 'Choose a new profile and task' }
+try {
+  $launch = & .\scripts\windows-launch.ps1 -Port $chromePort -ProfileDir $chromeProfile -TaskName $taskName
+  $launch.Version
+  Get-ScheduledTask -TaskName $taskName | Select-Object TaskName, State
+  Invoke-RestMethod "http://127.0.0.1:$chromePort/json/version"
+  py -3 close_idle_tabs.py --port $chromePort
+  if ($LASTEXITCODE -ne 0) { throw 'Python check failed' }
+} finally {
+  if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+    Stop-ScheduledTask -TaskName $taskName
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+  }
+  $profileArgument = '--user-data-dir=("?)' + [regex]::Escape($chromeProfile) + '\1(?=\s|$)'
+  Get-CimInstance Win32_Process -Filter "name = 'chrome.exe'" |
+    Where-Object { $_.CommandLine -and $_.CommandLine -match $profileArgument } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }
+  Start-Sleep -Seconds 2
+  if (Test-Path -LiteralPath $chromeProfile) { Remove-Item -LiteralPath $chromeProfile -Recurse -Force }
+  if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) { throw 'Own task remains' }
+  if (Test-Path -LiteralPath $chromeProfile) { throw 'Own profile remains' }
+  if (Get-NetTCPConnection -LocalPort $chromePort -State Listen -ErrorAction SilentlyContinue) { throw 'Port still has a listener; investigate without stopping other browsers' }
+  'Cleanup verified: own task/profile removed, port has no listener.'
 }
-if (-not $version) { throw "Chrome did not expose port $chromePort; remove your task using the cleanup block below." }
-$version
-"Task: $taskName"
-"Disposable profile: $chromeProfile"
-py -3 close_idle_tabs.py --port $chromePort
 ```
 
-After using the dedicated browser, remove only this task and its Chrome/profile:
-
-```powershell
-Stop-ScheduledTask -TaskName $taskName
-Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
-$profileArgument = '--user-data-dir=("?)' + [regex]::Escape($chromeProfile) + '\1(?=\s|$)'
-Get-CimInstance Win32_Process -Filter "name = 'chrome.exe'" |
-  Where-Object { $_.CommandLine -and $_.CommandLine -match $profileArgument } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }
-Start-Sleep -Seconds 2
-Remove-Item -LiteralPath $chromeProfile -Recurse -Force
-```
-
-If you reconnect, use the printed task name/profile path to restore `$taskName`
-and `$chromeProfile` before cleanup. Never stop all Chrome processes.
+To clean up a browser launched with the standalone script, save the `finally`
+body as `cleanup.ps1`, preceded by `$ErrorActionPreference = 'Stop'` and explicit
+assignments to `$taskName`, `$chromeProfile` and `$chromePort` using the printed
+values. Run it with `powershell -NoProfile -ExecutionPolicy Bypass -File cleanup.ps1`.
+Never stop all Chrome processes. The desktop command above creates no task;
+stop only its profile-matched Chrome and remove that disposable profile.
 
 An ordinary Windows SSH shell has no interactive desktop. In verification,
 both direct headless launch and `Start-Process` exposed a listener while the
@@ -309,7 +371,13 @@ satisfy this guard. `about:blank` is protected only when no real page exists;
 when there are only internal pages, there is no real page to protect.
 
 `--idle-seconds` accepts integers with a **minimum of 1 second** (default: 600);
-0 is rejected. Eligible dry-run output such as `idle for 4s (threshold 2s); would close`
+0 is rejected before checking for an endpoint. There is **no maximum**: the
+threshold is compared with elapsed time since the saved observation, not with
+how long this single invocation runs. Above **31536000 seconds (365 days)**, a
+one-line notice on stderr (also under `--quiet`) warns that eligibility needs
+observations this old in saved state. Reuse the same default state file or
+`--state-file` across runs; a fresh state cannot immediately qualify. A very
+large threshold may therefore never be reached in practice. Eligible dry-run output such as `idle for 4s (threshold 2s); would close`
 describes time already observed, not an additional wait.
 
 If the endpoint is unreachable (connection, DNS or timeout), the run is skipped,
