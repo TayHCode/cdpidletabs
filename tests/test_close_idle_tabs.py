@@ -38,6 +38,15 @@ class IdleTabsTests(unittest.TestCase):
         close.assert_not_called()
         self.assertEqual(len(tool.load_state(self.state)), 2)
 
+    def test_idle_report_names_elapsed_time_and_threshold(self):
+        self.args.idle_seconds = 2
+        self.run_at(100)
+        with patch.object(tool, "fetch_pages", return_value=self.pages), patch.object(tool.time, "time", return_value=104), patch.object(tool, "close_page") as close, redirect_stdout(io.StringIO()) as out:
+            tool.run(self.args)
+        close.assert_not_called()
+        self.assertIn("idle for 4s (threshold 2s); would close", out.getvalue())
+        self.assertNotIn("would close after", out.getvalue())
+
     def test_close_keeps_last_page_and_removes_closed_state(self):
         self.args.close = True
         self.run_at(100)
@@ -101,11 +110,23 @@ class IdleTabsTests(unittest.TestCase):
         self.assertTrue(request.full_url.endswith("/json/close/page%2Fid"))
 
     def test_help_without_endpoint_does_not_contact_browser(self):
-        with patch.dict(os.environ, {}, clear=True), patch("sys.argv", ["cdpidletabs", "--help"]), patch.object(tool, "urlopen") as opened, redirect_stdout(io.StringIO()):
+        with patch.dict(os.environ, {}, clear=True), patch("sys.argv", ["cdpidletabs", "--help"]), patch.object(tool, "urlopen") as opened, redirect_stdout(io.StringIO()) as out:
             with self.assertRaises(SystemExit) as caught:
                 tool.parse_args()
         self.assertEqual(caught.exception.code, 0)
+        self.assertIn("minimum: 1", out.getvalue())
         opened.assert_not_called()
+
+    def test_idle_seconds_minimum_is_one(self):
+        for value in ("0", "-1"):
+            with patch("sys.argv", ["cdpidletabs", "--port", "9450", "--idle-seconds", value]), patch.object(tool, "urlopen") as opened, redirect_stderr(io.StringIO()) as err:
+                with self.assertRaises(SystemExit) as caught:
+                    tool.parse_args()
+            self.assertEqual(caught.exception.code, 2)
+            self.assertIn("--idle-seconds must be at least 1", err.getvalue())
+            opened.assert_not_called()
+        with patch("sys.argv", ["cdpidletabs", "--port", "9450", "--idle-seconds", "1"]):
+            self.assertEqual(tool.parse_args().idle_seconds, 1)
 
     def test_old_python_gets_friendly_error_before_arguments_or_network(self):
         with patch.object(tool.sys, "version_info", (3, 7, 17)), patch.object(tool, "parse_args") as parse, patch.object(tool, "urlopen") as opened, redirect_stderr(io.StringIO()) as err:
@@ -148,6 +169,10 @@ class IdleTabsTests(unittest.TestCase):
     def test_missing_state_directory_fails_before_observing_or_closing(self):
         self.args.close = True
         self.args.state_file = str(Path(self.tmp.name) / "missing" / "state.json")
+        try:
+            Path(self.args.state_file).parent.stat()
+        except OSError as error:
+            expected_reason = error.strerror
         out, err = io.StringIO(), io.StringIO()
         with patch.object(tool, "fetch_pages") as fetch, patch.object(tool, "close_page") as close, patch("sys.argv", ["cdpidletabs", "--endpoint", self.args.endpoint, "--close", "--state-file", self.args.state_file]), redirect_stdout(out), redirect_stderr(err):
             code = tool.main()
@@ -156,6 +181,28 @@ class IdleTabsTests(unittest.TestCase):
         close.assert_not_called()
         self.assertEqual(out.getvalue(), "")
         self.assertIn("could not write the state file", err.getvalue())
+        self.assertIn(self.args.state_file, err.getvalue())
+        self.assertIn(expected_reason, err.getvalue())
+
+    def test_state_preflight_names_path_and_reason_without_touching_browser(self):
+        blocker = Path(self.tmp.name) / "ordinary-file"
+        blocker.write_text("preserve me")
+        for path, reason in ((blocker / "state.json", os.strerror(tool.errno.ENOTDIR)),
+                             (Path(self.tmp.name), os.strerror(tool.errno.EISDIR))):
+            self.args.state_file = str(path)
+            with patch.object(tool, "fetch_pages") as fetch, patch.object(tool, "close_page") as close:
+                with self.assertRaises(tool.ToolError) as caught:
+                    tool.run(self.args)
+            self.assertIn(str(path), str(caught.exception))
+            self.assertIn(reason, str(caught.exception))
+            fetch.assert_not_called()
+            close.assert_not_called()
+        self.assertEqual(blocker.read_text(), "preserve me")
+        with patch.object(tool.os, "access", return_value=False):
+            with self.assertRaises(tool.ToolError) as caught:
+                tool.check_state_writable(self.state)
+        self.assertIn(str(self.state), str(caught.exception))
+        self.assertIn(os.strerror(tool.errno.EACCES), str(caught.exception))
 
     def test_future_state_timestamp_does_not_close(self):
         self.run_at(200)
@@ -206,7 +253,7 @@ class IdleTabsTests(unittest.TestCase):
         with patch.object(tool, "fetch_pages", return_value=pages), patch.object(tool.time, "time", return_value=111), patch.object(tool, "close_page") as close, redirect_stdout(out):
             tool.run(self.args)
         close.assert_called_once_with(self.args.endpoint, "intro")
-        self.assertIn("close requested after 11 unchanged seconds", out.getvalue())
+        self.assertIn("idle for 11s (threshold 10s); close requested", out.getvalue())
         self.assertNotIn(": closed", out.getvalue())
         self.assertNotIn("intro", tool.load_state(self.state))
         # A still-listed target is observed afresh on the following run.
@@ -244,6 +291,27 @@ class IdleTabsTests(unittest.TestCase):
             self.assertEqual(tool.main(), 0)
         self.assertFalse(self.state.exists())
 
+    def test_refused_endpoint_is_clearly_not_checked_and_names_port(self):
+        self.args.endpoint = "http://127.0.0.1:9450"
+        self.run_at(100)
+        before = self.state.read_bytes()
+        for quiet in (False, True):
+            self.args.quiet = quiet
+            refused = URLError(ConnectionRefusedError(tool.errno.ECONNREFUSED, "fixture refused"))
+            with patch.object(tool, "parse_args", return_value=self.args), patch.object(tool, "urlopen", side_effect=refused), redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(tool.main(), 0)
+            if quiet:
+                self.assertEqual(err.getvalue(), "")
+            else:
+                self.assertIn("NOT CHECKED: nothing is listening on port 9450", err.getvalue())
+            self.assertEqual(self.state.read_bytes(), before)
+
+    def test_timeout_does_not_claim_no_listener(self):
+        with patch.object(tool, "parse_args", return_value=self.args), patch.object(tool, "urlopen", side_effect=TimeoutError()), redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(tool.main(), 0)
+        self.assertIn("NOT CHECKED: CDP endpoint unavailable", err.getvalue())
+        self.assertNotIn("nothing is listening", err.getvalue())
+
     def test_bad_json_and_http_rejection_remain_errors_in_quiet_mode(self):
         self.args.quiet = True
         response = MagicMock(); response.__enter__.return_value = response
@@ -266,7 +334,16 @@ class IdleTabsTests(unittest.TestCase):
     def test_missing_state_is_empty_and_write_failure_is_reported(self):
         self.assertEqual(tool.load_state(self.state), {})
         with patch.object(Path, 'write_text', side_effect=OSError('fixture denied')):
-            with self.assertRaises(tool.ToolError):tool.save_state(self.state, {})
+            with self.assertRaises(tool.ToolError) as caught:tool.save_state(self.state, {})
+        self.assertIn(str(self.state), str(caught.exception))
+        self.assertIn('fixture denied', str(caught.exception))
+
+    def test_state_read_failure_names_path_and_os_reason(self):
+        with patch.object(Path, "open", side_effect=PermissionError(tool.errno.EACCES, os.strerror(tool.errno.EACCES))):
+            with self.assertRaises(tool.ToolError) as caught:
+                tool.load_state(self.state)
+        self.assertIn(str(self.state), str(caught.exception))
+        self.assertIn(os.strerror(tool.errno.EACCES), str(caught.exception))
 
     def test_keep_glob_resets_idle_clock_until_removed(self):
         self.args.keep = ['https://example.com/*']; self.args.close = True

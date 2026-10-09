@@ -2,10 +2,12 @@
 """Report or close unchanged Chrome page targets through the DevTools HTTP API."""
 
 import argparse
+import errno
 import fnmatch
 import hashlib
 import json
 import os
+import stat
 import sys
 import time
 from pathlib import Path
@@ -45,7 +47,7 @@ def parse_args():
         "--idle-seconds",
         type=int,
         default=600,
-        help="unchanged time required before a page is eligible (default: 600)",
+        help="unchanged seconds required before a page is eligible (minimum: 1; default: 600)",
     )
     parser.add_argument(
         "--keep",
@@ -75,7 +77,7 @@ def parse_args():
     if not args.endpoint:
         parser.error("set CDP_ENDPOINT or pass --endpoint or --port")
     if args.idle_seconds < 1:
-        parser.error("--idle-seconds must be a positive integer")
+        parser.error("--idle-seconds must be at least 1")
     problem = endpoint_problem(args.endpoint)
     if problem:
         parser.error("--endpoint " + problem)
@@ -118,7 +120,14 @@ def request_json(endpoint, path):
     except HTTPError as error:
         raise ToolError("CDP rejected the page-list request") from error
     except (URLError, TimeoutError, OSError) as error:
-        raise EndpointUnavailable("CDP endpoint unavailable; skipped this run") from error
+        reason = error.reason if isinstance(error, URLError) else error
+        if isinstance(reason, ConnectionRefusedError):
+            parts = urlsplit(endpoint)
+            port = parts.port if parts.port is not None else (443 if parts.scheme == "https" else 80)
+            message = "NOT CHECKED: nothing is listening on port {} (CDP endpoint unavailable; skipped this run)".format(port)
+        else:
+            message = "NOT CHECKED: CDP endpoint unavailable; skipped this run"
+        raise EndpointUnavailable(message) from error
     except ValueError as error:
         raise ToolError("CDP returned invalid JSON") from error
 
@@ -148,10 +157,10 @@ def load_state(path):
     except FileNotFoundError:
         return {}
     except (OSError, ValueError) as error:
-        raise ToolError("could not read the state file") from error
+        raise ToolError("could not read the state file {!s}: {}".format(path, error)) from error
 
     if not isinstance(state, dict) or state.get("version") != 1 or not isinstance(state.get("pages"), dict):
-        raise ToolError("state file has an unsupported format")
+        raise ToolError("state file {!s} has an unsupported format".format(path))
     return state["pages"]
 
 
@@ -160,16 +169,29 @@ def save_state(path, pages):
     try:
         path.write_text(json.dumps(state, sort_keys=True) + "\n", encoding="utf-8")
     except OSError as error:
-        raise ToolError("could not write the state file") from error
+        raise ToolError("could not write the state file {!s}: {}".format(path, error)) from error
 
 
 def check_state_writable(path):
     """Fail before any browser action if the state file could not be saved."""
-    parent = path.parent
-    if not parent.is_dir() or not os.access(parent, os.W_OK | os.X_OK):
-        raise ToolError("could not write the state file")
-    if path.exists() and (not path.is_file() or not os.access(path, os.W_OK)):
-        raise ToolError("could not write the state file")
+    try:
+        parent = path.parent
+        if not stat.S_ISDIR(parent.stat().st_mode):
+            raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), str(parent))
+        if not os.access(parent, os.W_OK | os.X_OK):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(parent))
+        try:
+            mode = path.stat().st_mode
+        except FileNotFoundError:
+            return
+        if stat.S_ISDIR(mode):
+            raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), str(path))
+        if not stat.S_ISREG(mode):
+            raise OSError(errno.EINVAL, "not a regular file", str(path))
+        if not os.access(path, os.W_OK):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))
+    except OSError as error:
+        raise ToolError("could not write the state file {!s}: {}".format(path, error)) from error
 
 
 def is_kept(url, patterns):
@@ -247,10 +269,10 @@ def run(args):
                 continue
             observations.pop(target_id, None)
             remaining_pages -= 1
-            report("Page {}: close requested after {} unchanged seconds.".format(target_id, elapsed))
+            report("Page {}: idle for {}s (threshold {}s); close requested.".format(target_id, elapsed, args.idle_seconds))
         else:
             remaining_pages -= 1
-            report("Page {}: would close after {} unchanged seconds.".format(target_id, elapsed))
+            report("Page {}: idle for {}s (threshold {}s); would close.".format(target_id, elapsed, args.idle_seconds))
 
     save_state(state_path, observations)
     if not args.close:
