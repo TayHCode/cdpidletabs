@@ -1,0 +1,8 @@
+[Unit]
+Description=Check unchanged browser tabs
+[Timer]
+OnActiveSec=60
+OnUnitActiveSec=60
+Unit=cdpidletabs.service
+[Install]
+WantedBy=timers.target

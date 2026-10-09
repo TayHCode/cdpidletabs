@@ -1,0 +1,10 @@
+name: Bug report
+description: Report a reproducible issue using fake browser data
+body:
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps, expected behavior and actual behavior
+      description: Use fake targets; omit private page titles, URLs and addresses.
+    validations:
+      required: true

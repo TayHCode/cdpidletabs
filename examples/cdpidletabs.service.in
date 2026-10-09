@@ -1,0 +1,7 @@
+[Unit]
+Description=Report unchanged browser tabs (dry run)
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.local/share/cdpidletabs
+EnvironmentFile=%h/.config/cdpidletabs/environment
+ExecStart=@VENV_BIN@/cdpidletabs --idle-seconds 600 --quiet

@@ -1,0 +1,9 @@
+.venv/
+.scratch/
+__pycache__/
+*.egg-info/
+dist/
+build/
+.close_idle_tabs_state.json
+
+scratch/

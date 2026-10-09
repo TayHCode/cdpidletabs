@@ -1,0 +1,51 @@
+{
+  "exclude": [
+    "systemd/"
+  ],
+  "approvals": [],
+  "quickstart": [
+    {
+      "file": "README.md",
+      "line": 16,
+      "argv": [
+        "python",
+        "-m",
+        "pip",
+        "install",
+        "."
+      ]
+    },
+    {
+      "file": "README.md",
+      "line": 17,
+      "argv": [
+        "cdpidletabs",
+        "--help"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "role": "tests",
+      "argv": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-q"
+      ]
+    },
+    {
+      "role": "syntax",
+      "argv": [
+        "python",
+        "-m",
+        "compileall",
+        "-q",
+        "close_idle_tabs.py"
+      ]
+    }
+  ]
+}
