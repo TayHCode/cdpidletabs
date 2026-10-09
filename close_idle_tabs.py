@@ -31,7 +31,11 @@ class EndpointUnavailable(ToolError):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Report or close Chrome page tabs whose title and URL stay unchanged."
+        description="Report or close Chrome page tabs whose title and URL stay unchanged.",
+        epilog="Always protect the first real page in Chrome's list (usually the most "
+               "recently active). Internal pages never satisfy this guard; about:blank "
+               "is a fallback only when there are no real pages. Protected pages "
+               "restart their idle clock each run.",
     )
     connection = parser.add_mutually_exclusive_group()
     connection.add_argument(
@@ -57,9 +61,14 @@ def parse_args():
         help="URL pattern to keep; may be given more than once",
     )
     parser.add_argument(
+        "--include-internal",
+        action="store_true",
+        help="also consider internal/extension pages for closing; they never satisfy the real-page guard",
+    )
+    parser.add_argument(
         "--state-file",
         default=DEFAULT_STATE_FILE,
-        help="file used to remember observations between timer runs",
+        help="reuse observations here (default: .close_idle_tabs_state.json in the working directory)",
     )
     parser.add_argument(
         "--close",
@@ -198,6 +207,29 @@ def is_kept(url, patterns):
     return any(fnmatch.fnmatchcase(url, pattern) for pattern in patterns)
 
 
+def is_internal(url):
+    return url.lower().startswith(("chrome:", "chrome-untrusted:", "devtools:",
+                                   "chrome-extension:", "chrome-search:"))
+
+
+def protected_page(pages):
+    """Choose the first real page; a blank page is only a no-real-page fallback."""
+    blank = None
+    for target in pages:
+        target_id = target.get("id")
+        if not isinstance(target_id, str) or not target_id:
+            continue
+        _, url = signature_for(target)
+        if not url or is_internal(url):
+            continue
+        if url.lower() == "about:blank":
+            if blank is None:
+                blank = target_id
+        else:
+            return target_id
+    return blank
+
+
 def close_page(endpoint, target_id):
     url = endpoint.rstrip("/") + "/json/close/" + quote(target_id, safe="")
     request = Request(url, method="PUT")
@@ -214,6 +246,7 @@ def run(args):
     check_state_writable(state_path)
     # A sleeping/offline browser must not read or overwrite observation state.
     page_targets = fetch_pages(args.endpoint)
+    protected_id = protected_page(page_targets)
     old_pages = load_state(state_path)
     now = time.time()
     observations = {}
@@ -242,13 +275,19 @@ def run(args):
             since = now
 
         kept = is_kept(url, args.keep)
-        if kept:
+        guarded = target_id == protected_id
+        skipped_internal = is_internal(url) and not getattr(args, "include_internal", False)
+        if kept or guarded or skipped_internal:
             since = now
 
         observations[target_id] = {"signature": signature, "since": since}
         elapsed = max(0, int(now - since))
         if kept:
             report("Page {}: kept by URL pattern.".format(target_id))
+        elif guarded:
+            report("Page {}: kept by the real-page guard (first real page, or blank fallback).".format(target_id))
+        elif skipped_internal:
+            report("Page {}: internal page skipped; use --include-internal to consider closing it.".format(target_id))
         elif elapsed >= args.idle_seconds:
             candidates.append((target_id, elapsed))
         elif not unchanged:
@@ -256,11 +295,7 @@ def run(args):
         else:
             report("Page {}: unchanged for {} seconds; waiting.".format(target_id, elapsed))
 
-    remaining_pages = len(page_targets)
     for target_id, elapsed in candidates:
-        if remaining_pages <= 1:
-            report("Page {}: kept as the last page.".format(target_id))
-            continue
         if args.close:
             try:
                 close_page(args.endpoint, target_id)
@@ -268,10 +303,8 @@ def run(args):
                 print("Page {}: close request failed.".format(target_id), file=sys.stderr)
                 continue
             observations.pop(target_id, None)
-            remaining_pages -= 1
             report("Page {}: idle for {}s (threshold {}s); close requested.".format(target_id, elapsed, args.idle_seconds))
         else:
-            remaining_pages -= 1
             report("Page {}: idle for {}s (threshold {}s); would close.".format(target_id, elapsed, args.idle_seconds))
 
     save_state(state_path, observations)

@@ -1,6 +1,6 @@
 # Close idle Chrome tabs
 
-Each run queries a Chrome DevTools Protocol (CDP) endpoint for page tabs and compares each tab's title and URL with the previous run. When that pair has stayed unchanged for the configured threshold, the script reports the tab as idle; with `--close`, it asks Chrome to close it. It runs in dry-run mode by default, keeps one remaining page open, and skips URLs matching `--keep` patterns.
+Each run queries a Chrome DevTools Protocol (CDP) endpoint for page tabs and compares each tab's title and URL with the previous run. When that pair has stayed unchanged for the configured threshold, the script reports the tab as idle; with `--close`, it asks Chrome to close it. It runs in dry-run mode by default, protects the first real page in Chrome’s list, and skips URLs matching `--keep` patterns.
 
 ## Install
 
@@ -49,10 +49,13 @@ for the script and test commands throughout this README.
 ### Optional installed command
 
 If you want a `cdpidletabs` command, use a virtual environment. The direct script
-above is the no-admin option. On Debian/Ubuntu, venv needs `python3-venv`; if
-`ensurepip` is missing, first install it with
-your package manager (for example `sudo apt install python3-venv`, requiring
-administrator access), or continue with the direct script above.
+above is the first-class, no-admin path. On Debian/Ubuntu, venv needs
+`python3-venv`. If creation fails because `ensurepip` is missing, delete the
+partial environment with `rm -rf .venv` (only the environment you just created)
+and continue with `python3 close_idle_tabs.py --help` and the direct script.
+If you prefer to retry installation, install `python3-venv` with your package
+manager (for example `sudo apt install python3-venv`, requiring administrator
+access), delete that partial `.venv`, then repeat the optional commands below.
 
 Linux/macOS:
 
@@ -162,8 +165,9 @@ chrome_profile=$(mktemp -d "${TMPDIR:-/tmp}/cdpidletabs-profile.XXXXXX")
 
 ### Windows (PowerShell)
 
-Run this in a **normal desktop PowerShell window on the Windows machine, not
-over SSH/remote shell**:
+#### At the Windows machine: desktop PowerShell
+
+Run this in a normal desktop PowerShell window on the Windows machine:
 
 ```powershell
 $chromeProfile = Join-Path $env:TEMP ("cdpidletabs-profile-" + [guid]::NewGuid())
@@ -174,27 +178,66 @@ $chromeProfile = Join-Path $env:TEMP ("cdpidletabs-profile-" + [guid]::NewGuid()
 
 If Chrome is installed elsewhere, replace the executable path with its actual
 location. `$chromeProfile` is a new disposable directory, not your regular profile.
+Check `/json/version` from a second PowerShell window as shown below.
 
-A Windows SSH shell has no interactive desktop, even when somebody is logged in
-at the console. The graphical command can exit silently with status 0 without
-leaving a debugging listener; Chrome launched from that shell can also die when
-the SSH session ends. `Start-Process` alone does not provide a desktop session.
+#### Over SSH / remote shell: use an interactive scheduled task
 
-For an SSH/remote shell, use headless Chrome (no visible window):
+The current Windows user must also be logged into the desktop. This route opens
+a visible Chrome window there and survives the launching SSH session ending.
+Use your own free port and a new task/profile. The block creates no trigger or
+recurring schedule, and does not require a password or an elevated principal.
+Keep the variable values in this shell for cleanup afterwards:
 
 ```powershell
+$ErrorActionPreference = 'Stop'
+$chromePort = 9446
+$chromeExe = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
 $chromeProfile = Join-Path $env:TEMP ("cdpidletabs-profile-" + [guid]::NewGuid())
-& "$env:ProgramFiles\Google\Chrome\Application\chrome.exe" `
-  --headless=new --remote-debugging-port=9446 --remote-debugging-address=127.0.0.1 `
-  "--user-data-dir=$chromeProfile"
+$taskName = "cdpidletabs-temp-" + [guid]::NewGuid()
+$currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+$action = New-ScheduledTaskAction -Execute $chromeExe -Argument (
+  "--remote-debugging-port=$chromePort --remote-debugging-address=127.0.0.1 " +
+  "--user-data-dir=`"$chromeProfile`"")
+$principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
+Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal | Out-Null
+Start-ScheduledTask -TaskName $taskName
+$version = $null
+for ($attempt = 0; $attempt -lt 40; $attempt++) {
+  try {
+    $version = Invoke-RestMethod "http://127.0.0.1:$chromePort/json/version"
+    break
+  } catch { Start-Sleep -Milliseconds 500 }
+}
+if (-not $version) { throw "Chrome did not expose port $chromePort; remove your task using the cleanup block below." }
+$version
+"Task: $taskName"
+"Disposable profile: $chromeProfile"
+py -3 close_idle_tabs.py --port $chromePort
 ```
 
-Keep the launch SSH session open while using it; check the endpoint from a second
-shell. Headless Chrome works without a desktop, but it also stops when that SSH
-session ends on Windows. For visible Chrome started remotely, run the desktop
-command in a scheduled task with `New-ScheduledTaskPrincipal -LogonType Interactive` for the
-logged-in user, then remove your task after use. A task running in the background
-without that interactive logon type is not equivalent to a desktop launch.
+After using the dedicated browser, remove only this task and its Chrome/profile:
+
+```powershell
+Stop-ScheduledTask -TaskName $taskName
+Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+$profileArgument = '--user-data-dir=("?)' + [regex]::Escape($chromeProfile) + '\1(?=\s|$)'
+Get-CimInstance Win32_Process -Filter "name = 'chrome.exe'" |
+  Where-Object { $_.CommandLine -and $_.CommandLine -match $profileArgument } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 2
+Remove-Item -LiteralPath $chromeProfile -Recurse -Force
+```
+
+If you reconnect, use the printed task name/profile path to restore `$taskName`
+and `$chromeProfile` before cleanup. Never stop all Chrome processes.
+
+An ordinary Windows SSH shell has no interactive desktop. In verification,
+both direct headless launch and `Start-Process` exposed a listener while the
+launching SSH session remained open, then lost it after disconnect. Other
+remote-shell attempts returned status 0 with no listener: an exit code alone is
+not proof of startup. Keeping a TTY SSH session open is not a persistent launch
+route. Use the interactive task above for remote-shell use. A logged-out desktop
+and a non-interactive task principal are not covered by these instructions.
 
 ### Check the dedicated endpoint
 
@@ -259,8 +302,11 @@ python3 close_idle_tabs.py --idle-seconds 600 --keep 'https://example.com/docs/*
 The first run records the current tab states. Invoke it repeatedly, at a shorter
 interval than the idle threshold, to accumulate unchanged time. It prints target
 IDs and their status. After reviewing dry-run output, add `--close` to request
-closure of eligible pages. It keeps at least one page from the fetched list
-without requesting its closure.
+closure of eligible pages. The guard always leaves at least one real page from
+the fetched list open, if one exists: it protects the **first real page** in
+Chrome's list, usually the most recently activated tab. Internal pages never
+satisfy this guard. `about:blank` is protected only when no real page exists;
+when there are only internal pages, there is no real page to protect.
 
 `--idle-seconds` accepts integers with a **minimum of 1 second** (default: 600);
 0 is rejected. Eligible dry-run output such as `idle for 4s (threshold 2s); would close`
@@ -274,7 +320,7 @@ JSON, HTTP rejection, bad arguments and state-file errors remain real errors;
 
 ## Honest limitations
 
-CDP does not provide a tab's last-active time here, so the script treats an unchanged title and URL across timer runs as idle. A page can still be in use while unchanged, and the tab you are looking at (the active tab) is not exempt: use `--keep` to protect pages you need. Agent tabs have no owner in this interface, so the script cannot know which agent opened a tab or whether that agent's session is done. Use keep patterns for URLs that should stay open.
+CDP does not provide a tab's last-active time here, so the script treats an unchanged title and URL across timer runs as idle. A page can still be in use while unchanged, and list order is only a preference for the guard, not proof that a tab is idle: use `--keep` to protect pages you need. Agent tabs have no owner in this interface, so the script cannot know which agent opened a tab or whether that agent's session is done. Use keep patterns for URLs that should stay open.
 
 The threshold also gives each tab a grace period after the last **observed** title
 or URL change: `--idle-seconds 300` waits five minutes after that change. It is not
@@ -283,16 +329,31 @@ and navigating away and back between runs can be missed. Time while Chrome is
 unreachable still counts since the last observation. Choose a conservative
 threshold and keep important pages explicitly.
 
+Ordinary pages keep their idle clock between runs when the same state file is
+reused. `--state-file` is optional: by default the script already reuses
+`.close_idle_tabs_state.json` in the working directory. A new/missing state file,
+a different working directory with no saved state, a changed target ID, or an
+observed title/URL change starts a fresh clock. Pages protected by `--keep`, the
+real-page guard, or the default internal-page skip restart their clock each run;
+after losing that protection they must reach the full threshold again. Dry runs
+also save these observations. `--state-file /path/to/state.json` makes reuse
+explicit across working directories; it does not measure activity between runs.
+
 No real-browser closure test is part of the automated suite. Before relying on it,
 use a disposable Chrome profile with expendable tabs, review dry-run output, then
-confirm that only eligible tabs close and the last page stays open.
+confirm that only eligible tabs close and a real page stays open.
 
-A fresh profile may open Chrome's own first-run/sign-in page (`chrome://intro/`)
-or new-tab page (`chrome://newtab/`). These are counted as page tabs and can
-become idle. Add `--keep 'chrome://*'` to protect them (PowerShell accepts the
-same quoted glob), or finish first-run setup in the disposable profile before
-testing ordinary tabs. Other internal schemes can be protected with additional
-`--keep` patterns.
+Internal pages are skipped by default: `chrome://`, `chrome-untrusted://`,
+`devtools://`, `chrome-extension://`, and `chrome-search://` (including first-run,
+sign-in and new-tab pages). They never count as the real page the guard protects,
+even with `--keep`. To consider closing internal/extension pages, explicitly
+pass `--include-internal`; keep patterns still apply. This opt-in can request
+closure of all internal pages when no real or blank page exists. Ordinary web,
+file and data pages are real pages. A blank tab is only a fallback when there
+are no real pages. Chrome usually lists the most recently activated page first;
+the tool uses the first real page in the fetched order without inferring a
+last-active timestamp. It protects that page even when other real pages are
+kept, still within their grace period, or fail to close.
 
 `--close` prints **"close requested"** when Chrome accepts the HTTP request;
 it does not confirm disappearance from `/json/list`. Ordinary pages can close
@@ -300,6 +361,6 @@ asynchronously, and internal pages such as "Sign in to Chrome" can remain
 listed despite an accepted request. Check the dedicated instance's `/json/list`
 afterwards when verifying actual closure. An accepted request removes that
 target's saved observation; if it is still listed on the next run, its idle clock
-starts again. Failed requests retain their observations. The last-page safeguard
-counts accepted requests against the fetched list; it does not track concurrent
-changes made by Chrome or other users.
+starts again. Failed requests retain their observations. The guard never
+requests closure of its chosen page, but only sees the fetched list: it cannot prevent Chrome or
+another user closing that page concurrently.

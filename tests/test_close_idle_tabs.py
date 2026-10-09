@@ -51,8 +51,8 @@ class IdleTabsTests(unittest.TestCase):
         self.args.close = True
         self.run_at(100)
         close = self.run_at(111)
-        close.assert_called_once_with(self.args.endpoint, "one")
-        self.assertEqual(set(tool.load_state(self.state)), {"two"})
+        close.assert_called_once_with(self.args.endpoint, "two")
+        self.assertEqual(set(tool.load_state(self.state)), {"one"})
 
     def test_changed_title_or_url_restarts_clock(self):
         self.args.close = True
@@ -247,6 +247,7 @@ class IdleTabsTests(unittest.TestCase):
         intro = {"id": "intro", "type": "page", "title": "Sign in to Chrome", "url": "chrome://intro/"}
         pages = [intro, self.pages[1]]
         self.args.close = True
+        self.args.include_internal = True
         self.run_at(100, pages)
         out = io.StringIO()
         # Chrome acknowledges the request, but continues listing its intro page.
@@ -257,7 +258,7 @@ class IdleTabsTests(unittest.TestCase):
         self.assertNotIn(": closed", out.getvalue())
         self.assertNotIn("intro", tool.load_state(self.state))
         # A still-listed target is observed afresh on the following run.
-        self.run_at(112, pages).assert_called_once_with(self.args.endpoint, "two")
+        self.run_at(112, pages).assert_not_called()
         self.assertEqual(tool.load_state(self.state)["intro"]["since"], 112)
 
     def test_internal_page_keep_pattern_prevents_a_close_request(self):
@@ -266,8 +267,8 @@ class IdleTabsTests(unittest.TestCase):
         self.args.close = True
         self.run_at(100, [intro, self.pages[1]])
         close = self.run_at(111, [intro, self.pages[1]])
-        close.assert_called_once_with(self.args.endpoint, "two")
-        self.assertEqual(set(tool.load_state(self.state)), {"intro"})
+        close.assert_not_called()
+        self.assertEqual(set(tool.load_state(self.state)), {"intro", "two"})
 
     def test_timer_starts_without_a_prior_service_activation(self):
         import configparser
@@ -349,12 +350,118 @@ class IdleTabsTests(unittest.TestCase):
         self.args.keep = ['https://example.com/*']; self.args.close = True
         self.run_at(100); self.run_at(150).assert_not_called()
         self.args.keep = []; self.run_at(151).assert_not_called()
-        self.run_at(161).assert_called_once_with(self.args.endpoint, 'one')
+        self.run_at(161).assert_called_once_with(self.args.endpoint, 'two')
 
     def test_cli_dry_run_and_quiet_defaults(self):
         with patch('sys.argv', ['cdpidletabs', '--endpoint', 'https://browser.example.test']):
             args=tool.parse_args()
         self.assertFalse(args.close); self.assertFalse(args.quiet)
+
+    def test_fake_cdp_user_and_internal_both_orders_keep_the_user(self):
+        user = self.pages[0]
+        for url in ("chrome://intro/", "chrome://newtab/", "chrome-untrusted://new-tab-page/",
+                    "devtools://devtools/bundled/inspector.html", "chrome-extension://abc/page.html",
+                    "chrome-search://local-ntp/local-ntp.html"):
+            internal = dict(id="internal", type="page", title="Internal", url=url)
+            for pages in ([user, internal], [internal, user]):
+                for include_internal in (False, True):
+                    for close_mode in (False, True):
+                        with self.subTest(url=url, first=pages[0]["id"],
+                                          include_internal=include_internal, close=close_mode):
+                            self.state.unlink(missing_ok=True)
+                            self.args.close = close_mode
+                            self.args.include_internal = include_internal
+                            with patch.object(tool, "request_json", return_value=pages) as request, \
+                                    patch.object(tool.time, "time", return_value=100), \
+                                    redirect_stdout(io.StringIO()):
+                                tool.run(self.args)
+                            request.assert_called_once_with(self.args.endpoint, "/json/list")
+                            with patch.object(tool, "request_json", return_value=pages), \
+                                    patch.object(tool.time, "time", return_value=111), \
+                                    patch.object(tool, "close_page") as close, \
+                                    redirect_stdout(io.StringIO()) as out:
+                                tool.run(self.args)
+                            if include_internal and close_mode:
+                                close.assert_called_once_with(self.args.endpoint, "internal")
+                            else:
+                                close.assert_not_called()
+                            self.assertIn("one", tool.load_state(self.state))
+                            self.assertNotIn("Page one: idle", out.getvalue())
+                            self.assertEqual(tool.load_state(self.state)["one"]["since"], 111)
+
+    def test_first_real_page_is_protected_after_list_order_changes(self):
+        self.args.close = True
+        self.run_at(100)
+        # Activating the second tab moves it first in Chrome's list.
+        close = self.run_at(111, list(reversed(self.pages)))
+        close.assert_called_once_with(self.args.endpoint, "one")
+        self.assertEqual(set(tool.load_state(self.state)), {"two"})
+        self.assertEqual(tool.load_state(self.state)["two"]["since"], 111)
+
+    def test_guarded_page_gets_full_grace_period_when_it_loses_guard(self):
+        self.args.close = True
+        self.run_at(100)
+        self.run_at(150, [self.pages[0]])
+        self.run_at(151, list(reversed(self.pages))).assert_not_called()
+        self.run_at(161, list(reversed(self.pages))).assert_called_once_with(self.args.endpoint, "one")
+
+    def test_blank_is_fallback_only_without_real_pages(self):
+        blank = dict(id="blank", type="page", title="", url="about:blank")
+        internal = dict(id="internal", type="page", title="NTP", url="chrome://newtab/")
+        for pages in ([blank, self.pages[0]], [self.pages[0], blank]):
+            self.assertEqual(tool.protected_page(pages), "one")
+        self.assertEqual(tool.protected_page([internal, blank]), "blank")
+        self.assertIsNone(tool.protected_page([internal]))
+        self.args.close = True
+        self.run_at(100, [blank, self.pages[0]])
+        self.run_at(111, [blank, self.pages[0]]).assert_called_once_with(self.args.endpoint, "blank")
+
+    def test_only_blank_pages_leave_first_blank_open(self):
+        pages = [dict(id=name, type="page", title="", url="about:blank") for name in ("a", "b")]
+        self.args.close = True
+        self.run_at(100, pages)
+        self.run_at(111, pages).assert_called_once_with(self.args.endpoint, "b")
+        self.assertEqual(set(tool.load_state(self.state)), {"a"})
+
+    def test_internal_only_pages_are_skipped_unless_opted_in(self):
+        pages = [dict(id="internal", type="page", title="Intro", url="chrome://intro/")]
+        self.args.close = True
+        self.run_at(100, pages)
+        self.run_at(111, pages).assert_not_called()
+        self.args.include_internal = True
+        self.run_at(112, pages).assert_not_called()
+        self.run_at(122, pages).assert_called_once_with(self.args.endpoint, "internal")
+
+    def test_invalid_id_and_empty_url_never_displace_real_guard(self):
+        invalid = [dict(type="page", url="https://example.com/"),
+                   dict(id="", type="page", url="https://example.com/"),
+                   dict(id="empty", type="page", url=None)]
+        self.assertEqual(tool.protected_page(invalid + self.pages), "one")
+
+    def test_internal_keep_does_not_allow_all_real_pages_to_close(self):
+        internal = dict(id="internal", type="page", title="Intro", url="chrome://intro/")
+        self.args.close = True
+        self.args.keep = ["chrome://*"]
+        pages = [internal] + self.pages
+        self.run_at(100, pages)
+        self.run_at(111, pages).assert_called_once_with(self.args.endpoint, "two")
+        self.assertEqual(set(tool.load_state(self.state)), {"internal", "one"})
+
+    def test_ordinary_page_clock_persists_with_reused_default_state_file(self):
+        with patch.object(tool, "DEFAULT_STATE_FILE", str(self.state)), \
+                patch("sys.argv", ["cdpidletabs", "--port", "9460"]):
+            self.args = tool.parse_args()
+        self.run_at(100)
+        self.run_at(150)
+        self.assertEqual(tool.load_state(self.state)["two"]["since"], 100)
+        self.state.unlink()
+        self.run_at(151)
+        self.assertEqual(tool.load_state(self.state)["two"]["since"], 151)
+
+    def test_cli_internal_opt_in_defaults_off(self):
+        for options, expected in (([], False), (["--include-internal"], True)):
+            with patch("sys.argv", ["cdpidletabs", "--port", "9460"] + options):
+                self.assertEqual(tool.parse_args().include_internal, expected)
 
 
 if __name__ == "__main__":
