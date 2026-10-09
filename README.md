@@ -92,14 +92,108 @@ See [SECURITY.md](SECURITY.md) before enabling browser access.
 
 ## Starting Chrome with debugging
 
+Choose a **free port** and a **new profile directory** for your own Chrome
+instance. The examples use 9446; the browser owner can pick any available TCP
+port. Change both Chrome's `--remote-debugging-port` and the script's endpoint
+when choosing another. Port 9222 is only a common convention, not a required
+port, and may already belong to someone else on a shared machine.
+
+Before launching, check the example port (use `py -3` on Windows). If this fails
+with "address already in use", pick a different port; do not attach to or stop
+the existing browser:
+
 ```sh
-google-chrome --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 \
-  --user-data-dir="$HOME/.config/chrome-debug"
+python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',9446)); s.close(); print('Port 9446 is available')"
 ```
 
-Use a dedicated, non-default `--user-data-dir`: Chrome 136 and later ignore the
-remote debugging flags on the default profile directory. Keep the address on
-loopback (`127.0.0.1`). Then use `CDP_ENDPOINT=http://127.0.0.1:9222`.
+Use a dedicated, non-default `--user-data-dir`: [Chrome 136 and later ignore
+remote debugging flags on the default profile directory](https://developer.chrome.com/blog/remote-debugging-port).
+Keep the address on loopback (`127.0.0.1`). Do not use your everyday profile.
+Install Chrome from [Google's download page](https://www.google.com/chrome/)
+if it is missing: on Debian/Ubuntu select the `.deb` and install it with your
+package manager; on macOS move the app to Applications; on Windows run the
+installer. Installation may require administrator access. For Linux without
+that access, [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/)
+offers a ZIP: extract it into your own folder and substitute its `chrome` binary
+path for `google-chrome` below (system shared libraries are still required).
+
+### Linux
+
+The graphical command needs a desktop session with a working display
+(`DISPLAY` on X11). `google-chrome` is the usual installed binary name:
+
+```sh
+chrome_profile=$(mktemp -d "${TMPDIR:-/tmp}/cdpidletabs-profile.XXXXXX")
+google-chrome --no-first-run --remote-debugging-port=9446 --remote-debugging-address=127.0.0.1 \
+  --user-data-dir="$chrome_profile"
+```
+
+`--no-first-run` skips Linux's initial setup dialog, which can otherwise pause
+startup before the debugging endpoint is available in a new profile.
+
+Over SSH without a display, use this headless alternative (no visible window):
+
+```sh
+chrome_profile=$(mktemp -d "${TMPDIR:-/tmp}/cdpidletabs-profile.XXXXXX")
+google-chrome --headless=new --remote-debugging-port=9446 \
+  --remote-debugging-address=127.0.0.1 --user-data-dir="$chrome_profile"
+```
+
+### macOS
+
+In Terminal, launch a separate Chrome app instance:
+
+```sh
+chrome_profile=$(mktemp -d "${TMPDIR:-/tmp}/cdpidletabs-profile.XXXXXX")
+open -na "Google Chrome" --args --remote-debugging-port=9446 \
+  --remote-debugging-address=127.0.0.1 --user-data-dir="$chrome_profile"
+```
+
+The app binary is also usable directly, including over SSH into a Mac with a
+logged-in graphical session (use a fresh profile when trying this alternative):
+
+```sh
+chrome_profile=$(mktemp -d "${TMPDIR:-/tmp}/cdpidletabs-profile.XXXXXX")
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --remote-debugging-port=9446 --remote-debugging-address=127.0.0.1 \
+  --user-data-dir="$chrome_profile"
+```
+
+### Windows (PowerShell)
+
+In a logged-in Windows desktop session:
+
+```powershell
+$chromeProfile = Join-Path $env:TEMP ("cdpidletabs-profile-" + [guid]::NewGuid())
+& "$env:ProgramFiles\Google\Chrome\Application\chrome.exe" `
+  --remote-debugging-port=9446 --remote-debugging-address=127.0.0.1 `
+  "--user-data-dir=$chromeProfile"
+```
+
+If Chrome is installed elsewhere, replace the executable path with its actual
+location. `$chromeProfile` is a new disposable directory, not your regular profile.
+
+### Check the dedicated endpoint
+
+In another terminal, confirm that **your newly launched** Chrome responds:
+
+```sh
+curl http://127.0.0.1:9446/json/version
+python3 close_idle_tabs.py --endpoint http://127.0.0.1:9446
+```
+
+PowerShell equivalent:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:9446/json/version
+py -3 close_idle_tabs.py --endpoint http://127.0.0.1:9446
+```
+
+Or set `CDP_ENDPOINT=http://127.0.0.1:9446` in a POSIX shell with
+`export CDP_ENDPOINT=http://127.0.0.1:9446`, or in PowerShell with
+`$env:CDP_ENDPOINT = 'http://127.0.0.1:9446'`. Reuse the same working directory
+and profile for repeated observations. For a disposable test, stop only the
+Chrome instance you launched and remove its profile directory after it exits.
 
 ## Example systemd user units
 
