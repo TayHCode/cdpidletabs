@@ -182,6 +182,13 @@ curl http://127.0.0.1:9446/json/version
 python3 close_idle_tabs.py --endpoint http://127.0.0.1:9446
 ```
 
+For a local browser, `python3 close_idle_tabs.py --port 9446` is shorthand for
+that endpoint. `--port` accepts 1–65535 and overrides `CDP_ENDPOINT`; do not
+combine it with `--endpoint`. Use `--endpoint` for an explicit HTTP(S) base URL.
+The script does not assume port 9222: supply `--port`, `--endpoint`, or
+`CDP_ENDPOINT` each run. These options select an existing endpoint; they do not
+launch Chrome or reserve a port.
+
 PowerShell equivalent:
 
 ```powershell
@@ -203,7 +210,7 @@ the reports. Installation is manual:
 
 1. Create the working directory the service expects: `mkdir -p ~/.local/share/cdpidletabs`.
 2. Create `~/.config/cdpidletabs/environment` containing one line,
-   `CDP_ENDPOINT=http://127.0.0.1:9222`.
+   `CDP_ENDPOINT=http://127.0.0.1:9446` (replace 9446 with your browser's port).
 3. Copy both templates to `~/.config/systemd/user/` as `cdpidletabs.service`
    and `cdpidletabs.timer`, replacing `@VENV_BIN@` in the service with the
    `bin` directory of your virtual environment (for example `/home/you/cdpidletabs/.venv/bin`).
@@ -219,7 +226,11 @@ With `CDP_ENDPOINT` set, this reports candidates for tabs unchanged for ten minu
 python3 close_idle_tabs.py --idle-seconds 600 --keep 'https://example.com/docs/*'
 ```
 
-The first run records the current tab states. Invoke it repeatedly from a timer, at a shorter interval than the idle threshold, to accumulate unchanged time. It prints target IDs and their status. After reviewing dry-run output, add `--close` to let Chrome close eligible pages. The last remaining page is always kept.
+The first run records the current tab states. Invoke it repeatedly, at a shorter
+interval than the idle threshold, to accumulate unchanged time. It prints target
+IDs and their status. After reviewing dry-run output, add `--close` to request
+closure of eligible pages. It keeps at least one page from the fetched list
+without requesting its closure.
 
 If the endpoint is unreachable (connection, DNS or timeout), the run is skipped,
 observation state stays unchanged, and it exits 0 with one short notice. Add
@@ -241,3 +252,20 @@ threshold and keep important pages explicitly.
 No real-browser closure test is part of the automated suite. Before relying on it,
 use a disposable Chrome profile with expendable tabs, review dry-run output, then
 confirm that only eligible tabs close and the last page stays open.
+
+A fresh profile may open Chrome's own first-run/sign-in page (`chrome://intro/`)
+or new-tab page (`chrome://newtab/`). These are counted as page tabs and can
+become idle. Add `--keep 'chrome://*'` to protect them (PowerShell accepts the
+same quoted glob), or finish first-run setup in the disposable profile before
+testing ordinary tabs. Other internal schemes can be protected with additional
+`--keep` patterns.
+
+`--close` prints **"close requested"** when Chrome accepts the HTTP request;
+it does not confirm disappearance from `/json/list`. Ordinary pages can close
+asynchronously, and internal pages such as "Sign in to Chrome" can remain
+listed despite an accepted request. Check the dedicated instance's `/json/list`
+afterwards when verifying actual closure. An accepted request removes that
+target's saved observation; if it is still listed on the next run, its idle clock
+starts again. Failed requests retain their observations. The last-page safeguard
+counts accepted requests against the fetched list; it does not track concurrent
+changes made by Chrome or other users.

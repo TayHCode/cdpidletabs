@@ -31,10 +31,15 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Report or close Chrome page tabs whose title and URL stay unchanged."
     )
-    parser.add_argument(
+    connection = parser.add_mutually_exclusive_group()
+    connection.add_argument(
         "--endpoint",
         default=os.environ.get("CDP_ENDPOINT"),
         help="Chrome DevTools HTTP base endpoint (or set CDP_ENDPOINT).",
+    )
+    connection.add_argument(
+        "--port", type=int, metavar="PORT",
+        help="use http://127.0.0.1:PORT, overriding CDP_ENDPOINT (choose a free port)",
     )
     parser.add_argument(
         "--idle-seconds",
@@ -63,8 +68,12 @@ def parse_args():
                         help="suppress normal reports and unavailable-endpoint notices")
     args = parser.parse_args()
 
+    if args.port is not None:
+        if not 1 <= args.port <= 65535:
+            parser.error("--port must be between 1 and 65535")
+        args.endpoint = "http://127.0.0.1:{}".format(args.port)
     if not args.endpoint:
-        parser.error("set CDP_ENDPOINT or pass --endpoint")
+        parser.error("set CDP_ENDPOINT or pass --endpoint or --port")
     if args.idle_seconds < 1:
         parser.error("--idle-seconds must be a positive integer")
     problem = endpoint_problem(args.endpoint)
@@ -77,9 +86,16 @@ def endpoint_problem(endpoint):
     """Name why an endpoint is unusable, or return None."""
     try:
         parts = urlsplit(endpoint)
+    except ValueError:
+        return "must be a valid HTTP(S) base URL"
+    try:
         parts.port  # Validate numeric ports before any request.
     except ValueError:
-        return "has a port that is not a number from 0 to 65535"
+        try:
+            int(parts.netloc.rpartition(":")[2])
+        except ValueError:
+            return "has a port that is not a number (use 0 to 65535)"
+        return "port must be between 0 and 65535"
     if parts.scheme not in ("http", "https"):
         return "must be an HTTP(S) base URL (scheme must be http or https)"
     if not parts.hostname:
@@ -231,7 +247,7 @@ def run(args):
                 continue
             observations.pop(target_id, None)
             remaining_pages -= 1
-            report("Page {}: closed after {} unchanged seconds.".format(target_id, elapsed))
+            report("Page {}: close requested after {} unchanged seconds.".format(target_id, elapsed))
         else:
             remaining_pages -= 1
             report("Page {}: would close after {} unchanged seconds.".format(target_id, elapsed))

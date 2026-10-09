@@ -170,6 +170,58 @@ class IdleTabsTests(unittest.TestCase):
         fetch.assert_not_called()
         self.assertIn('port that is not a number',err.getvalue())
 
+    def test_out_of_range_port_names_range_without_calling_it_nonnumeric(self):
+        for value in ("99999", "-1"):
+            with patch("sys.argv", ["cdpidletabs", "--endpoint", "http://127.0.0.1:" + value]), patch.object(tool, "urlopen") as opened, redirect_stderr(io.StringIO()) as err:
+                with self.assertRaises(SystemExit) as caught:
+                    tool.parse_args()
+            self.assertEqual(caught.exception.code, 2)
+            self.assertIn("port must be between 0 and 65535", err.getvalue())
+            self.assertNotIn("not a number", err.getvalue())
+            opened.assert_not_called()
+
+    def test_port_selects_loopback_and_overrides_environment_without_requests(self):
+        for port in (1, 9446, 65535):
+            with patch.dict(os.environ, {"CDP_ENDPOINT": "https://browser.example.test"}), patch("sys.argv", ["cdpidletabs", "--port", str(port)]), patch.object(tool, "urlopen") as opened:
+                args = tool.parse_args()
+            self.assertEqual(args.endpoint, "http://127.0.0.1:" + str(port))
+            self.assertFalse(args.close)
+            opened.assert_not_called()
+
+    def test_port_rejects_bad_values_and_explicit_endpoint_conflicts(self):
+        for options in (["--port", "0"], ["--port", "65536"], ["--port", "-1"], ["--port", "bad"], ["--port", "9446", "--endpoint", self.args.endpoint]):
+            with patch("sys.argv", ["cdpidletabs", *options]), patch.object(tool, "urlopen") as opened, redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    tool.parse_args()
+            self.assertEqual(caught.exception.code, 2)
+            opened.assert_not_called()
+
+    def test_internal_page_acknowledged_close_is_reported_only_as_requested(self):
+        intro = {"id": "intro", "type": "page", "title": "Sign in to Chrome", "url": "chrome://intro/"}
+        pages = [intro, self.pages[1]]
+        self.args.close = True
+        self.run_at(100, pages)
+        out = io.StringIO()
+        # Chrome acknowledges the request, but continues listing its intro page.
+        with patch.object(tool, "fetch_pages", return_value=pages), patch.object(tool.time, "time", return_value=111), patch.object(tool, "close_page") as close, redirect_stdout(out):
+            tool.run(self.args)
+        close.assert_called_once_with(self.args.endpoint, "intro")
+        self.assertIn("close requested after 11 unchanged seconds", out.getvalue())
+        self.assertNotIn(": closed", out.getvalue())
+        self.assertNotIn("intro", tool.load_state(self.state))
+        # A still-listed target is observed afresh on the following run.
+        self.run_at(112, pages).assert_called_once_with(self.args.endpoint, "two")
+        self.assertEqual(tool.load_state(self.state)["intro"]["since"], 112)
+
+    def test_internal_page_keep_pattern_prevents_a_close_request(self):
+        intro = {"id": "intro", "type": "page", "title": "Sign in to Chrome", "url": "chrome://intro/"}
+        self.args.keep = ["chrome://*"]
+        self.args.close = True
+        self.run_at(100, [intro, self.pages[1]])
+        close = self.run_at(111, [intro, self.pages[1]])
+        close.assert_called_once_with(self.args.endpoint, "two")
+        self.assertEqual(set(tool.load_state(self.state)), {"intro"})
+
     def test_timer_starts_without_a_prior_service_activation(self):
         import configparser
         config=configparser.ConfigParser();config.read(Path(__file__).parents[1]/'examples/cdpidletabs.timer.in')
