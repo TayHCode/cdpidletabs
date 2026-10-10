@@ -2,11 +2,203 @@
   "exclude": [
     "systemd/"
   ],
-  "approvals": [],
+  "approvals": [
+    {
+      "scope": "tree",
+      "kind": "ipv4",
+      "path": "close_idle_tabs.py",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Loopback address for local browser access; contains no remote host identity."
+    },
+    {
+      "scope": "history",
+      "kind": "ipv4",
+      "path": "close_idle_tabs.py",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Loopback address for local browser access; contains no remote host identity."
+    },
+    {
+      "scope": "tree",
+      "kind": "ipv4",
+      "path": "SECURITY.md",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Loopback address for local browser access; contains no remote host identity."
+    },
+    {
+      "scope": "history",
+      "kind": "ipv4",
+      "path": "SECURITY.md",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Loopback address for local browser access; contains no remote host identity."
+    },
+    {
+      "scope": "tree",
+      "kind": "ipv4",
+      "path": "README.md",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Loopback address for local browser access; contains no remote host identity."
+    },
+    {
+      "scope": "history",
+      "kind": "ipv4",
+      "path": "README.md",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Loopback address for local browser access; contains no remote host identity."
+    },
+    {
+      "scope": "tree",
+      "kind": "internal-host",
+      "path": "tests/test_close_idle_tabs.py",
+      "fingerprint": "f05092c2c63356bc",
+      "reason": "Reserved .test domain used only in mocked HTTP fixtures."
+    },
+    {
+      "scope": "history",
+      "kind": "internal-host",
+      "path": "tests/test_close_idle_tabs.py",
+      "fingerprint": "f05092c2c63356bc",
+      "reason": "Reserved .test domain used only in mocked HTTP fixtures."
+    },
+    {
+      "scope": "tree",
+      "kind": "ipv4",
+      "path": "tests/test_close_idle_tabs.py",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Loopback address for local browser access; contains no remote host identity."
+    },
+    {
+      "scope": "history",
+      "kind": "ipv4",
+      "path": "tests/test_close_idle_tabs.py",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Loopback address for local browser access; contains no remote host identity."
+    },
+    {
+      "scope": "tree",
+      "kind": "ipv4",
+      "path": "scripts/windows-launch.ps1",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Loopback address for local browser access; contains no remote host identity."
+    },
+    {
+      "scope": "history",
+      "kind": "ipv4",
+      "path": "scripts/windows-launch.ps1",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Loopback address for local browser access; contains no remote host identity."
+    },
+    {
+      "scope": "metadata",
+      "kind": "email",
+      "path": "@refs",
+      "fingerprint": "cd29c5ac348a026a",
+      "reason": "Public automated co-author attribution, not a personal contact address."
+    },
+    {
+      "scope": "metadata",
+      "kind": "email",
+      "path": "@refs",
+      "fingerprint": "b6b620a2d451185b",
+      "reason": "Public automated co-author attribution, not a personal contact address."
+    },
+    {
+      "scope": "metadata",
+      "kind": "email",
+      "path": "@commit/3338b94e870b",
+      "fingerprint": "b6b620a2d451185b",
+      "reason": "Public automated co-author attribution, not a personal contact address."
+    },
+    {
+      "scope": "metadata",
+      "kind": "email",
+      "path": "@commit/28f0f093c7b2",
+      "fingerprint": "b6b620a2d451185b",
+      "reason": "Public automated co-author attribution, not a personal contact address."
+    },
+    {
+      "scope": "metadata",
+      "kind": "email",
+      "path": "@commit/3483845ece9f",
+      "fingerprint": "b6b620a2d451185b",
+      "reason": "Public automated co-author attribution, not a personal contact address."
+    },
+    {
+      "scope": "metadata",
+      "kind": "email",
+      "path": "@commit/0f30c85aaaa7",
+      "fingerprint": "b6b620a2d451185b",
+      "reason": "Public automated co-author attribution, not a personal contact address."
+    },
+    {
+      "scope": "metadata",
+      "kind": "email",
+      "path": "@commit/7ec92a5a3c67",
+      "fingerprint": "b6b620a2d451185b",
+      "reason": "Public automated co-author attribution, not a personal contact address."
+    },
+    {
+      "scope": "metadata",
+      "kind": "email",
+      "path": "@commit/403340d1c73d",
+      "fingerprint": "b6b620a2d451185b",
+      "reason": "Public automated co-author attribution, not a personal contact address."
+    },
+    {
+      "scope": "metadata",
+      "kind": "email",
+      "path": "@commit/d681143a5f00",
+      "fingerprint": "b6b620a2d451185b",
+      "reason": "Public automated co-author attribution, not a personal contact address."
+    },
+    {
+      "scope": "metadata",
+      "kind": "email",
+      "path": "@commit/ffc000db2087",
+      "fingerprint": "b6b620a2d451185b",
+      "reason": "Public automated co-author attribution, not a personal contact address."
+    },
+    {
+      "scope": "metadata",
+      "kind": "email",
+      "path": "@commit/89e168aca011",
+      "fingerprint": "b6b620a2d451185b",
+      "reason": "Public automated co-author attribution, not a personal contact address."
+    },
+    {
+      "scope": "metadata",
+      "kind": "email",
+      "path": "@commit/332c7ca36060",
+      "fingerprint": "b6b620a2d451185b",
+      "reason": "Public automated co-author attribution, not a personal contact address."
+    },
+    {
+      "scope": "metadata",
+      "kind": "email",
+      "path": "@commit/ba9bfdbef75e",
+      "fingerprint": "b6b620a2d451185b",
+      "reason": "Public automated co-author attribution, not a personal contact address."
+    },
+    {
+      "scope": "metadata",
+      "kind": "email",
+      "path": "@commit/8e6df07ad072",
+      "fingerprint": "cd29c5ac348a026a",
+      "reason": "Public automated co-author attribution, not a personal contact address."
+    }
+  ],
   "quickstart": [
     {
       "file": "README.md",
-      "line": 16,
+      "line": 11,
+      "argv": [
+        "python3",
+        "close_idle_tabs.py",
+        "--help"
+      ]
+    },
+    {
+      "file": "README.md",
+      "line": 65,
       "argv": [
         "python",
         "-m",
@@ -17,7 +209,7 @@
     },
     {
       "file": "README.md",
-      "line": 17,
+      "line": 66,
       "argv": [
         "cdpidletabs",
         "--help"
@@ -28,14 +220,16 @@
     {
       "role": "tests",
       "argv": [
-        "python",
+        "python3",
         "-m",
         "unittest",
         "discover",
         "-s",
         "tests",
         "-q"
-      ]
+      ],
+      "file": "README.md",
+      "line": 91
     },
     {
       "role": "syntax",

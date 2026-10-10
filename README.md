@@ -97,17 +97,17 @@ See [SECURITY.md](SECURITY.md) before enabling browser access.
 ## Starting Chrome with debugging
 
 Choose a **free port** and a **new profile directory** for your own Chrome
-instance. The examples use 9446; the browser owner can pick any available TCP
+instance. The examples use 9222; the browser owner can pick any available TCP
 port. Change both Chrome's `--remote-debugging-port` and the script's endpoint
-when choosing another. Port 9222 is only a common convention, not a required
-port, and may already belong to someone else on a shared machine.
+when choosing another. Port 9222 is a common convention, not a required port,
+and may already belong to someone else on a shared machine.
 
 Before launching, check the example port (use `py -3` on Windows). If this fails
 with "address already in use", pick a different port; do not attach to or stop
 the existing browser:
 
 ```sh
-python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',9446)); s.close(); print('Port 9446 is available')"
+python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',9222)); s.close(); print('Port 9222 is available')"
 ```
 
 Use a dedicated, non-default `--user-data-dir`: [Chrome 136 and later ignore
@@ -128,7 +128,7 @@ The graphical command needs a desktop session with a working display
 
 ```sh
 chrome_profile=$(mktemp -d "${TMPDIR:-/tmp}/cdpidletabs-profile.XXXXXX")
-google-chrome --no-first-run --remote-debugging-port=9446 --remote-debugging-address=127.0.0.1 \
+google-chrome --no-first-run --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 \
   --user-data-dir="$chrome_profile"
 ```
 
@@ -139,7 +139,7 @@ Over SSH without a display, use this headless alternative (no visible window):
 
 ```sh
 chrome_profile=$(mktemp -d "${TMPDIR:-/tmp}/cdpidletabs-profile.XXXXXX")
-google-chrome --headless=new --remote-debugging-port=9446 \
+google-chrome --headless=new --remote-debugging-port=9222 \
   --remote-debugging-address=127.0.0.1 --user-data-dir="$chrome_profile"
 ```
 
@@ -152,7 +152,7 @@ Python's `zipfile` extraction: it drops those permissions. Explicitly restore
 the executable bits on Chrome and its helper binaries as well; a non-executable
 `chrome_crashpad_handler` causes a `posix_spawn ... Permission denied` crash.
 
-Run from the repository in a shell with a free port (9446 here):
+Run from the repository in a shell with a free port (9222 here):
 
 ```sh
 cft_dir=$(mktemp -d "${TMPDIR:-/tmp}/cdpidletabs-cft.XXXXXX")
@@ -162,7 +162,7 @@ curl -fL "$cft_url" -o "$cft_dir/chrome.zip"
 unzip -q "$cft_dir/chrome.zip" -d "$cft_dir"
 chmod +x "$cft_dir/chrome-linux64/chrome" "$cft_dir/chrome-linux64/chrome_crashpad_handler" "$cft_dir/chrome-linux64/chrome_sandbox"
 chrome_profile="$cft_dir/profile"
-"$cft_dir/chrome-linux64/chrome" --headless=new --no-first-run --no-default-browser-check --remote-debugging-port=9446 --remote-debugging-address=127.0.0.1 --user-data-dir="$chrome_profile" >"$cft_dir/chrome.log" 2>&1 &
+"$cft_dir/chrome-linux64/chrome" --headless=new --no-first-run --no-default-browser-check --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 --user-data-dir="$chrome_profile" >"$cft_dir/chrome.log" 2>&1 &
 chrome_pid=$!
 ```
 
@@ -172,8 +172,8 @@ the background command's exit status. These flags worked with the normal Chrome
 sandbox; they do not require `--no-sandbox`.
 
 ```sh
-curl --fail http://127.0.0.1:9446/json/version
-python3 close_idle_tabs.py --port 9446
+curl --fail http://127.0.0.1:9222/json/version
+python3 close_idle_tabs.py --port 9222
 ```
 
 Keep these variables in the same shell. When finished, stop only the instance
@@ -191,7 +191,7 @@ In Terminal, launch a separate Chrome app instance:
 
 ```sh
 chrome_profile=$(mktemp -d "${TMPDIR:-/tmp}/cdpidletabs-profile.XXXXXX")
-open -na "Google Chrome" --args --remote-debugging-port=9446 \
+open -na "Google Chrome" --args --remote-debugging-port=9222 \
   --remote-debugging-address=127.0.0.1 --user-data-dir="$chrome_profile"
 ```
 
@@ -201,7 +201,7 @@ logged-in graphical session (use a fresh profile when trying this alternative):
 ```sh
 chrome_profile=$(mktemp -d "${TMPDIR:-/tmp}/cdpidletabs-profile.XXXXXX")
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --remote-debugging-port=9446 --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 \
   --user-data-dir="$chrome_profile"
 ```
 
@@ -213,7 +213,7 @@ Run this in a normal desktop PowerShell window on the Windows machine:
 
 ```powershell
 $chromeProfile = Join-Path $env:TEMP ("cdpidletabs-profile-" + [guid]::NewGuid())
-& "$env:ProgramFiles\Google\Chrome\Application\chrome.exe" --no-first-run --remote-debugging-port=9446 --remote-debugging-address=127.0.0.1 "--user-data-dir=$chromeProfile"
+& "$env:ProgramFiles\Google\Chrome\Application\chrome.exe" --no-first-run --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 "--user-data-dir=$chromeProfile"
 ```
 
 If Chrome is installed elsewhere, replace the executable path with its actual
@@ -232,10 +232,10 @@ creates and runs a uniquely named task, waits for `/json/version`, and prints
 the task name and disposable profile for later cleanup:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-launch.ps1 -Port 9446
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-launch.ps1 -Port 9222
 ```
 
-`-ProfileDir` accepts a **new, nonexistent** disposable directory; `-ChromeExe`
+The `ProfileDir` parameter accepts a **new, nonexistent** disposable directory; `-ChromeExe`
 accepts another installed Chrome path. The script rejects existing profiles,
 task names and occupied ports. It does not run the Python tool or delete the
 task on success. Copy the printed task name/profile: variables and returned
@@ -257,12 +257,13 @@ removes its task/profile after the dry run, including on startup failure):
 ```powershell
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
-$chromePort = 9446
+$chromePort = 9222
 $chromeProfile = Join-Path $env:TEMP ("cdpidletabs-profile-" + [guid]::NewGuid())
 $taskName = "cdpidletabs-temp-" + [guid]::NewGuid()
 if ((Test-Path -LiteralPath $chromeProfile) -or (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) { throw 'Choose a new profile and task' }
 try {
-  $launch = & .\scripts\windows-launch.ps1 -Port $chromePort -ProfileDir $chromeProfile -TaskName $taskName
+  $launchOptions = @{ Port = $chromePort; ProfileDir = $chromeProfile; TaskName = $taskName }
+  $launch = & .\scripts\windows-launch.ps1 @launchOptions
   $launch.Version
   Get-ScheduledTask -TaskName $taskName | Select-Object TaskName, State
   Invoke-RestMethod "http://127.0.0.1:$chromePort/json/version"
@@ -306,11 +307,11 @@ and a non-interactive task principal are not covered by these instructions.
 In another terminal, confirm that **your newly launched** Chrome responds:
 
 ```sh
-curl http://127.0.0.1:9446/json/version
-python3 close_idle_tabs.py --endpoint http://127.0.0.1:9446
+curl http://127.0.0.1:9222/json/version
+python3 close_idle_tabs.py --endpoint http://127.0.0.1:9222
 ```
 
-For a local browser, `python3 close_idle_tabs.py --port 9446` is shorthand for
+For a local browser, `python3 close_idle_tabs.py --port 9222` is shorthand for
 that endpoint. `--port` accepts 1–65535 and overrides `CDP_ENDPOINT`; do not
 combine it with `--endpoint`. Use `--endpoint` for an explicit HTTP(S) base URL.
 The script does not assume port 9222: supply `--port`, `--endpoint`, or
@@ -320,20 +321,20 @@ launch Chrome or reserve a port.
 PowerShell equivalent:
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:9446/json/version
-py -3 close_idle_tabs.py --endpoint http://127.0.0.1:9446
+Invoke-RestMethod http://127.0.0.1:9222/json/version
+py -3 close_idle_tabs.py --endpoint http://127.0.0.1:9222
 ```
 
 The version request must return Chrome's JSON before continuing. If no listener
-is available, the script prints **`NOT CHECKED: nothing is listening on port 9446`**
+is available, the script prints **`NOT CHECKED: nothing is listening on port 9222`**
 (followed by a skipped-run explanation). Its exit status is still 0 for
 scheduled-use compatibility; this is **not a successful endpoint check**. Fix
 the launch or port and repeat the version request. DNS/timeout failures also
 print `NOT CHECKED`, without claiming that there is no listener.
 
-Or set `CDP_ENDPOINT=http://127.0.0.1:9446` in a POSIX shell with
-`export CDP_ENDPOINT=http://127.0.0.1:9446`, or in PowerShell with
-`$env:CDP_ENDPOINT = 'http://127.0.0.1:9446'`. Reuse the same working directory
+Or set `CDP_ENDPOINT=http://127.0.0.1:9222` in a POSIX shell with
+`export CDP_ENDPOINT=http://127.0.0.1:9222`, or in PowerShell with
+`$env:CDP_ENDPOINT = 'http://127.0.0.1:9222'`. Reuse the same working directory
 and profile for repeated observations. For a disposable test, stop only the
 Chrome instance you launched and remove its profile directory after it exits.
 
@@ -345,10 +346,10 @@ the reports. Installation is manual:
 
 1. Create the working directory the service expects: `mkdir -p ~/.local/share/cdpidletabs`.
 2. Create `~/.config/cdpidletabs/environment` containing one line,
-   `CDP_ENDPOINT=http://127.0.0.1:9446` (replace 9446 with your browser's port).
+   `CDP_ENDPOINT=http://127.0.0.1:9222` (replace 9222 with your browser's port).
 3. Copy both templates to `~/.config/systemd/user/` as `cdpidletabs.service`
    and `cdpidletabs.timer`, replacing `@VENV_BIN@` in the service with the
-   `bin` directory of your virtual environment (for example `/home/you/cdpidletabs/.venv/bin`).
+   `bin` directory of your virtual environment (for example `<clone-directory>/.venv/bin`).
 4. Run `systemctl --user daemon-reload` and `systemctl --user enable --now cdpidletabs.timer`.
 
 The timer runs the service every 60 seconds, starting a minute after it is enabled.
@@ -415,7 +416,7 @@ Internal pages are skipped by default: `chrome://`, `chrome-untrusted://`,
 `devtools://`, `chrome-extension://`, and `chrome-search://` (including first-run,
 sign-in and new-tab pages). They never count as the real page the guard protects,
 even with `--keep`. To consider closing internal/extension pages, explicitly
-pass `--include-internal`; keep patterns still apply. This opt-in can request
+use `--include-internal`; keep patterns still apply. This opt-in can request
 closure of all internal pages when no real or blank page exists. Ordinary web,
 file and data pages are real pages. A blank tab is only a fallback when there
 are no real pages. Chrome usually lists the most recently activated page first;

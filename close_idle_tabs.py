@@ -113,7 +113,7 @@ def endpoint_problem(endpoint):
         return "must be an HTTP(S) base URL (scheme must be http or https)"
     if not parts.hostname:
         return "must be an HTTP(S) base URL with a host name"
-    if parts.username is not None or parts.password is not None:
+    if parts.username is not None or (parts.password) is not None:
         return "must not contain credentials"
     if parts.query or parts.fragment:
         return "must not contain a query string or fragment"

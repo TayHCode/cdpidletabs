@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [ValidateRange(1, 65535)]
-    [int]$Port = 9446,
+    [int]$Port = 9222,
     [string]$ProfileDir = (Join-Path $env:TEMP ("cdpidletabs-profile-" + [guid]::NewGuid())),
     [string]$TaskName = ("cdpidletabs-temp-" + [guid]::NewGuid()),
     [string]$ChromeExe = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
@@ -30,7 +30,8 @@ $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $arguments = "--no-first-run --remote-debugging-port=$Port --remote-debugging-address=127.0.0.1 --user-data-dir=`"$ProfileDir`""
 $action = New-ScheduledTaskAction -Execute $ChromeExe -Argument $arguments
 $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
-Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal | Out-Null
+$registration = @{ TaskName = $TaskName; Action = $action; Principal = $principal }
+Register-ScheduledTask @registration | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 $version = $null
 for ($attempt = 0; $attempt -lt 40; $attempt++) {
