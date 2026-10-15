@@ -288,7 +288,7 @@ class IdleTabsTests(unittest.TestCase):
         self.assertIn("idle for 11s (threshold 10s); close requested", out.getvalue())
         self.assertNotIn(": closed", out.getvalue())
         self.assertNotIn("intro", tool.load_state(self.state))
-        # A still-listed target is observed afresh on the following run.
+
         self.run_at(112, pages).assert_not_called()
         self.assertEqual(tool.load_state(self.state)["intro"]["since"], 112)
 
